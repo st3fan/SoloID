@@ -19,21 +19,22 @@ and apps, including Argon2id password hashes. No database or runtime disk writes
 
 | Concern | Choice |
 | --- | --- |
-| Runtime | Node 22, strict TypeScript |
-| HTTP | Hono + `@hono/node-server` |
-| HTML | Server-rendered `hono/jsx`; no browser JavaScript |
-| Styling | Tailwind CSS v4 CLI, one stylesheet; simple card/input/button/alert UI inspired by shadcn/ui, without React |
-| JWTs / JWKS | `jose`, RS256 signatures |
-| Passwords | `@node-rs/argon2`, Argon2id PHC strings |
-| Configuration | Zod schema, validated at startup and reload |
-| Login failure counter | `rate-limiter-flexible`, `RateLimiterMemory` |
-| CLI | Node `parseArgs`; shares config and hashing code with the server |
-| Build / tests | tsup, tsx, Vitest, `openid-client` |
-| Packaging | Multi-stage Docker build, distroless Node 22 non-root runtime |
+| Runtime | Go 1.27, one static binary with `CGO_ENABLED=0` |
+| HTTP | Standard-library `net/http` with bounded bodies and server timeouts |
+| HTML | Server-rendered `html/template`; contextual escaping, no browser JavaScript |
+| Styling | One plain CSS stylesheet preserving the existing design, embedded with `go:embed` |
+| JWTs / JWKS | `go-jose/v4`, RS256 signatures |
+| Passwords | `golang.org/x/crypto/argon2`, interoperable Argon2id PHC strings |
+| Configuration | Typed structs and `encoding/json`, unknown-field rejection and explicit validation |
+| Login failure counter | Bounded mutex-protected email counters and per-email gates |
+| CLI | Standard-library `flag`, `x/term` for hidden password input; shared config/hash code |
+| Build / tests | `go build`, `go vet`, `go test -race`, `httptest`, `coreos/go-oidc/v3` + `x/oauth2` client integration |
+| Packaging | Multi-stage Go build, distroless static non-root runtime, embedded HTML/CSS |
 
-Hono replaces the earlier Next.js/App Router choice. A React component library
-adds no value to these server-rendered forms, so shadcn/ui is a visual reference,
-not a dependency.
+Go replaces the earlier TypeScript/Hono stack completely. No Node, npm, JSX,
+Tailwind compiler, or frontend dependency remains in the build or runtime.
+Keep existing JSON config, user IDs, keys, hashes, protocol endpoints, and visual
+design. The same binary serves HTTP and runs CLI commands.
 
 ## State: no persistent state, not zero state
 
@@ -50,13 +51,19 @@ in memory rather than using stateless encrypted codes.
 | Authorization codes | In-process map, indexed by code digest | Random 256-bit values; 60 seconds, atomic single use, maximum 10,000 |
 | Access / ID tokens | Signed JWTs held by the client | 15 minutes / 5 minutes |
 | Failed-login counts and locks | In-process memory, keyed by normalized email | One-hour counting window, 15-minute lockout; cleared on restart |
-| Login queues / hashing concurrency | In-process memory | Serialize attempts per email and bound native memory use |
+| Login queues / hashing concurrency | In-process memory | Serialize attempts per email and bound Argon2 memory use |
 
 Reloading a validated config atomically replaces the runtime and clears pending
 codes while retaining failure counters. Restarting clears both. Neither requires
 a database; already-issued cookies and tokens survive if their keys and user
 credentials are unchanged. A code exchange interrupted by restart/reload must
 restart authorization.
+
+Go handles requests concurrently: protect code consumption, runtime replacement,
+and counters with mutexes. Hashing and signing run outside the runtime lock.
+Buffer responses, recheck the config snapshot, and publish cookies/tokens/redirects
+under a read lock; a reload during a request discards its stale response with 503.
+This also prevents a signing race from issuing credentials removed by a reload.
 
 Cookies are signed, not encrypted: they contain no passwords or private keys.
 Use an HKDF-derived cookie key from the config's 32-byte random `secret`, with
@@ -98,8 +105,8 @@ parameters for all configured hashes: Argon2id v19, 64 MiB, 3 passes, 4 lanes,
 network noise, queue contention, lookup, and success redirects differ. Locked
 attempts skip Argon2 equally for known and unknown emails. Overlong requests are
 rejected before hashing for either kind of account. Cap passwords at 1024 UTF-8
-bytes, emails at 254 characters, request bodies at 16 KiB, and URLs at 8192
-characters. The CLI requires new passwords of at least 12 Unicode code points.
+bytes, emails at 254 UTF-8 bytes, request bodies at 16 KiB, and URLs at 8192
+bytes. The CLI requires new passwords of at least 12 Unicode code points.
 
 Run a diagnostic alternating wrong passwords for known users and unknown emails,
 with warmup and 100 samples per group; report median/p95. Do not assert statistical
@@ -121,9 +128,16 @@ The defaults are fixed constants, not configuration knobs:
 - Serialize attempts for the same email so parallel requests cannot evade the
   threshold. Retain counters across valid and failed config reloads.
 - Bound tracked identities at 10,000, pending login attempts at 32, and concurrent
-  native password verifications at two, including client-secret verification.
+  Argon2 password verifications at two, including client-secret verification.
   Capacity exhaustion fails closed with 503 and `Retry-After`. Expiry alone is
   not a sufficient memory bound.
+
+Use a small Go state machine rather than request-rate middleware: only failed
+password checks consume the budget. A mutex protects the bounded entry table;
+each entry has a cancellation-aware channel gate so same-email checks serialize.
+Reserve capacity before hashing, including in-flight identities. A shared two-slot
+channel bounds password verification across login and token endpoints. There is
+no external rate-limiter service or general-purpose IP limiter.
 
 Tradeoffs: someone who knows an email can deliberately lock it. Rotating emails
 can still consume CPU or fill the bounded identity table. Use infrastructure
@@ -132,7 +146,7 @@ another password attempt and is not blocked by a password lockout.
 
 ## Configuration and CLI
 
-The schema and example live in `src/config.ts` and `deploy/config.example.json`.
+The schema and example live in `internal/soloid/config.go` and `deploy/config.example.json`.
 The example intentionally has invalid placeholders; `init` creates real keys.
 
 - `issuer`: HTTPS origin, no path/query/trailing slash; HTTP localhost for dev.
@@ -150,20 +164,23 @@ The example intentionally has invalid placeholders; `init` creates real keys.
 - `clients`: nonempty list of unique `client_id`, optional display `name`, exact
   `redirect_uris`, optional `post_logout_redirect_uris`, and either a hashed secret
   or `public: true`. Every client uses PKCE S256. Optional `allowed_users` contains
-  **user IDs**; omitted means all users, empty means none.
+  **user IDs**; omitted or `null` means all users, an empty array means none.
 
 Reject unknown fields, invalid keys/hashes, duplicates, dangling user references,
 wildcards/fragments/credentials in redirect URLs, and inconsistent client auth.
 Only HTTPS and HTTP localhost callbacks are supported, not custom native schemes.
 
-CLI commands, bundled into `dist/cli.js`:
+CLI commands in the single `soloid` binary:
 
-- `init`: print a skeleton with fresh cookie secret, RSA key, and user UUID.
+- `serve` (default): start HTTP and handle SIGHUP plus graceful SIGTERM/SIGINT.
+- `init`: print a skeleton with fresh cookie secret, RSA key, and random user ID.
 - `hash`: prompt twice without echo; `--stdin` supports scripted input. Never
   accept a password as a command-line argument.
 - `gen-secret`: print a random client secret and its Argon2id hash. Give the raw
   secret to the client, store only the hash in SoloID.
 - `check --config PATH`: validate config without starting a server.
+- `healthcheck`: check the local listener, used by Compose without a shell/curl.
+- `version`: print embedded release/commit metadata, also used by integration tests.
 
 `SOLOID_CONFIG` selects the file. SIGHUP reloads it; invalid reloads retain the
 previous runtime. Configuration and backups contain private keys and must not be
@@ -230,8 +247,8 @@ Ship `Dockerfile` and `deploy/compose.yaml`, with **only SoloID**. Do not deploy
 Caddy or another proxy. The README includes Caddy examples for an existing proxy
 on the host and one on a shared external Docker network.
 
-- Multi-stage image: build TypeScript/CSS, retain production dependencies only,
-  run as distroless non-root UID/GID 65532 with read-only root filesystem.
+- Multi-stage image: compile one static Go binary with embedded templates/CSS,
+  run as distroless static non-root UID/GID 65532 with read-only root filesystem.
 - Drop capabilities, set no-new-privileges; no writable volumes/tmpfs needed.
 - Mount `./config:/config:ro` as a directory so atomic file replacement works.
   Directory mode 0750 and file mode 0640 with a readable group are suitable on a
@@ -244,7 +261,7 @@ on the host and one on a shared external Docker network.
 - Build locally until images are published. CI tests pushes and PRs. A separate
   GitHub Release `published` workflow tests and publishes a GHCR image from the
   release tag; no publishing on draft releases, tag pushes alone, or PRs.
-- Bake the semantic release tag and full commit SHA into the server bundle.
+- Bake the semantic release tag and full commit SHA into the binary with linker flags.
   The footer shows `Powered by SoloID v0.1.0 (abcdef0)`, linking the version to
   its GitHub release and the short hash to its full commit. Development builds
   omit the version; source archives without Git metadata show an unlinked unknown
@@ -255,12 +272,12 @@ on the host and one on a shared external Docker network.
 Deliver as one pull request with code, config example, CLI, deployment, tests,
 and operational README. Do not merge or publish a release as part of the PR.
 
-- Type-check, compile the server/CLI and CSS, then run HTTP contract tests.
+- Run gofmt, `go vet`, `go test -race`, and the static binary build. No CSS build.
 - Cover redirect injection, duplicate parameters, CSRF/cookie forgery, scope and
   token-type separation, client authentication, PKCE, replay, expiry, SSO/logout,
   restrictions, and config changes. Test both known and unknown email lockouts,
   expiry boundaries, reset, and concurrent failures.
-- Use a real server and `openid-client` to exercise discovery, login, code exchange,
+- Use a real binary and `coreos/go-oidc/v3` + `x/oauth2` to exercise discovery, login, code exchange,
   ID-token signature verification through JWKS, and userinfo. Exercise CLI and HUP.
 - Build and boot Compose, validate health/discovery/public JWKS/CSS and container CLI.
 - Inspect rendered login, failure, lockout, narrow layout, and logout states in a

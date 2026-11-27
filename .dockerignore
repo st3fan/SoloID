@@ -1,7 +1,7 @@
 .git
 .amp
-node_modules
-dist
+bin
+coverage.out
 deploy/config
 .env
 *.log

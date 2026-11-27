@@ -10,14 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-go@v6
         with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm test
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l cmd internal scripts)"
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go run ./scripts/build
       - run: bash scripts/compose-smoke.sh
       - if: failure()
         run: docker compose -p soloid-smoke -f deploy/compose.yaml logs --no-color

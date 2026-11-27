@@ -1,20 +1,18 @@
-FROM node:22-bookworm-slim AS build
+FROM golang:1.27.4-bookworm AS build
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY tsconfig.json ./
-COPY tsup.config.ts ./
-COPY src ./src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+COPY scripts/build ./scripts/build
 ARG SOLOID_VERSION=""
 ARG SOLOID_COMMIT="unknown"
-RUN npm run typecheck && npm run build && npm prune --omit=dev
+RUN go run ./scripts/build -o /out/soloid
 
-FROM gcr.io/distroless/nodejs22-debian12:nonroot
-WORKDIR /app
-ENV NODE_ENV=production PORT=3000
-COPY --from=build --chown=65532:65532 /app/dist ./dist
-COPY --from=build --chown=65532:65532 /app/node_modules ./node_modules
-COPY --from=build --chown=65532:65532 /app/package.json ./package.json
+FROM gcr.io/distroless/static-debian12:nonroot
+ENV PORT=3000
+COPY --from=build /out/soloid /soloid
+USER 65532:65532
 EXPOSE 3000
-ENTRYPOINT ["/nodejs/bin/node"]
-CMD ["dist/server.js"]
+ENTRYPOINT ["/soloid"]
+CMD ["serve"]

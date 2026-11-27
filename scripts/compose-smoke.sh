@@ -14,28 +14,20 @@ cleanup() {
   rm -f deploy/config/config.json
 }
 trap cleanup EXIT
-npx tsx scripts/fixture-config.ts > deploy/config/config.json
+go run ./scripts/fixture-config > deploy/config/config.json
 # Disposable fixture only: the non-root container needs read access.
 chmod 644 deploy/config/config.json
 docker compose -p soloid-smoke -f deploy/compose.yaml up --build -d --wait --wait-timeout 120
-node --input-type=module <<'JS'
-import assert from 'node:assert/strict';
-const discovery = await (await fetch('http://localhost:3000/.well-known/openid-configuration')).json();
-assert.equal(discovery.issuer, 'http://localhost:3000');
-assert.deepEqual(discovery.code_challenge_methods_supported, ['S256']);
-const jwks = await (await fetch(discovery.jwks_uri)).json();
-assert.equal(jwks.keys.length, 1);
-assert.equal(jwks.keys[0].kty, 'RSA');
-assert.equal(jwks.keys[0].d, undefined);
-assert.equal((await fetch('http://localhost:3000/app.css')).status, 200);
-const page = await (await fetch('http://localhost:3000/')).text();
-assert.ok(page.includes(`href="https://github.com/st3fan/SoloID/commit/${process.env.SOLOID_COMMIT}"`));
-assert.ok(page.includes(`>${process.env.SOLOID_COMMIT.slice(0, 7)}</a>`));
-if (process.env.SOLOID_VERSION) {
-  assert.ok(page.includes(`href="https://github.com/st3fan/SoloID/releases/tag/${encodeURIComponent(process.env.SOLOID_VERSION)}"`));
-} else {
-  assert.ok(!page.includes('/releases/tag/'));
-}
-console.log('Compose smoke test passed: healthy, discovery, public JWKS, CSS, build identity');
-JS
-docker compose -p soloid-smoke -f deploy/compose.yaml exec -T soloid /nodejs/bin/node dist/cli.js check --config /config/config.json
+curl -fsS http://localhost:3000/.well-known/openid-configuration | jq -e '.issuer == "http://localhost:3000" and .code_challenge_methods_supported == ["S256"]'
+curl -fsS http://localhost:3000/jwks.json | jq -e '(.keys | length) == 1 and .keys[0].kty == "RSA" and .keys[0].d == null'
+curl -fsS http://localhost:3000/app.css > /dev/null
+page=$(curl -fsS http://localhost:3000/)
+[[ "$page" == *"href=\"https://github.com/st3fan/SoloID/commit/$SOLOID_COMMIT\""* ]]
+[[ "$page" == *">${SOLOID_COMMIT:0:7}</a>"* ]]
+if [[ -n "${SOLOID_VERSION:-}" ]]; then
+  [[ "$page" == *"href=\"https://github.com/st3fan/SoloID/releases/tag/$SOLOID_VERSION\""* ]]
+else
+  [[ "$page" != *'/releases/tag/'* ]]
+fi
+docker compose -p soloid-smoke -f deploy/compose.yaml exec -T soloid /soloid check --config /config/config.json
+echo 'Compose smoke test passed: healthy, discovery, public JWKS, embedded CSS, build identity, CLI'

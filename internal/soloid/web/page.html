@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{.Title}} · SoloID</title><link rel="stylesheet" href="/app.css"></head>
+<body>
+  <div class="layout">
+    <header><a class="brand" href="/" aria-label="SoloID home"><span aria-hidden="true">S</span>SoloID</a></header>
+    <main>
+      {{if eq .Kind "login"}}
+      <section class="card" aria-labelledby="heading">
+        <h1 id="heading">Welcome back</h1>
+        <p class="intro">Sign in to continue to <strong>{{.App}}</strong>.</p>
+        {{if .Error}}<div role="alert" class="alert">{{.Error}}</div>{{end}}
+        <form method="post" action="/login">
+          <input type="hidden" name="csrf" value="{{.CSRF}}">
+          <div class="field"><label for="email">Email address</label><input id="email" type="email" name="email" value="{{.Email}}" autocomplete="username" placeholder="you@example.com" maxlength="254" required></div>
+          <div class="field"><label for="password">Password</label><input id="password" type="password" name="password" autocomplete="current-password" maxlength="1024" required></div>
+          <button type="submit">Sign in <span aria-hidden="true">→</span></button>
+        </form>
+      </section>
+      {{else if eq .Kind "logout"}}
+      <section class="card"><h1>Sign out of SoloID?</h1><p>This ends your sign-in session here. Apps you already signed in to may keep their own sessions.</p>
+        <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Sign out</button></form>
+      </section>
+      {{else}}
+      <section class="card"><h1>{{.Title}}</h1><p>{{.Message}}</p></section>
+      {{end}}
+    </main>
+    <footer>Powered by SoloID{{if .Version}} <a href="{{.ReleaseURL}}">{{.Version}}</a>{{end}} ({{if .CommitURL}}<a href="{{.CommitURL}}">{{.Commit}}</a>{{else}}{{.Commit}}{{end}})</footer>
+  </div>
+</body>
+</html>

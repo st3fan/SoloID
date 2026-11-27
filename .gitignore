@@ -1,6 +1,5 @@
-node_modules/
-dist/
-coverage/
+bin/
+coverage.out
 .amp/
 deploy/config/
 .env

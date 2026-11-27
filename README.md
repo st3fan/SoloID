@@ -3,9 +3,9 @@
 The Solo Identity Provider. Just for you.
 
 A small self-hosted OpenID Connect provider: one JSON file, email/password login,
-multiple users and apps, and no database. Built with TypeScript, Hono, and
-server-rendered HTML styled with Tailwind. No browser JavaScript, signup, second
-factor, or refresh tokens.
+multiple users and apps, and no database. Built in Go with `net/http`, escaped
+HTML templates, and embedded CSS. One static binary; no Node, frontend build,
+browser JavaScript, signup, second factor, or refresh tokens.
 
 **Deploy one container with Docker Compose behind your existing HTTPS reverse
 proxy.** SoloID does not deploy or manage that proxy.
@@ -20,9 +20,9 @@ SOLOID_COMMIT=$(git rev-parse HEAD) docker compose build
 mkdir -p config
 chmod 700 config
 umask 077
-docker compose run --rm soloid dist/cli.js init > config/config.json
-docker compose run --rm soloid dist/cli.js hash
-docker compose run --rm soloid dist/cli.js gen-secret
+docker compose run --rm -T soloid init > config/config.json
+docker compose run --rm soloid hash
+docker compose run --rm soloid gen-secret
 ```
 
 `init` creates fresh keys and a **skeleton**, not working default credentials.
@@ -36,8 +36,9 @@ Edit `config/config.json`:
    not twice as it would in UTF-16 units.
 3. Configure each app's exact callback URL. Give the app the `client_secret` from
    `gen-secret`; put only its `client_secret_hash` in SoloID's config.
-4. Keep each user's `id` unchanged for that person's lifetime. Generate a different
-   UUID for every additional user; never reuse a deleted user's ID.
+4. Keep each user's `id` unchanged for that person's lifetime. Use a different
+   opaque ID for every additional user (a UUID is fine); never reuse a deleted
+   user's ID. `init` generates a random 256-bit ID.
 
 The runtime container uses UID/GID **65532**. On a standard Linux Docker host, make
 the config readable by that group, but not world-readable:
@@ -46,7 +47,7 @@ the config readable by that group, but not world-readable:
 sudo chown -R root:65532 config
 sudo chmod 750 config
 sudo chmod 640 config/config.json
-docker compose run --rm soloid dist/cli.js check --config /config/config.json
+docker compose run --rm soloid check --config /config/config.json
 docker compose up -d
 docker compose logs -f soloid
 ```
@@ -128,7 +129,7 @@ to generate real keys. Unknown config fields are rejected.
 | `clients[].public` | Set true for clients unable to keep a secret; then omit the secret hash. |
 | `clients[].redirect_uris` | Exact HTTPS callback URLs, or HTTP localhost for development. No wildcards, fragments, or URL credentials. |
 | `clients[].post_logout_redirect_uris` | Optional exact return URLs after logout. |
-| `clients[].allowed_users` | Optional list of **user IDs**, not emails. Omit for all configured users; `[]` denies everyone. |
+| `clients[].allowed_users` | Optional list of **user IDs**, not emails. Omit or use `null` for all configured users; `[]` denies everyone. |
 
 At least one user and client are required. All apps are owner-approved; there is
 no consent UI. Rate limits are deliberately not configurable.
@@ -175,7 +176,7 @@ Run from `deploy/`:
 
 ```sh
 # Validate before reloading; failed reloads keep the old configuration.
-docker compose run --rm soloid dist/cli.js check --config /config/config.json
+docker compose run --rm soloid check --config /config/config.json
 docker compose kill -s HUP soloid
 
 # Restart / logs
@@ -251,30 +252,48 @@ Review it before trusting it with sensitive applications.
 
 ## Development and tests
 
-Node 22.12+ and npm:
+Go 1.27+ (no npm or C toolchain needed for the application build):
 
 ```sh
-npm ci
-npm run typecheck
-npm run build
-npm test
-npm run timing
+go mod download
+go vet ./...
+go test -race ./...
+go run ./scripts/build
+# Optional diagnostic, not part of CI:
+SOLOID_TIMING=1 go test ./internal/soloid -run '^TestTimingDiagnostic$' -count=1 -v
 ```
+
+The race detector requires a C compiler on the development/CI host; the shipped
+binary is built with `CGO_ENABLED=0`. The only runtime dependencies are Go libraries:
+`go-jose/v4` for JWT/JWK operations, `x/crypto/argon2` for passwords, and `x/term`
+for hidden CLI password input. Tests also use `coreos/go-oidc/v3` and `x/oauth2`.
 
 Tests use disposable keys and credentials. They cover the HTTP security contract,
 concurrent code replay and login failures, expiry, CLI operations, real-process
-SIGHUP reloads, and a complete `openid-client` flow including signature verification
-through discovery/JWKS. `timing` compares 100 wrong-password samples for known and
-unknown emails; it is a diagnostic rather than a CI pass/fail threshold.
+SIGHUP reloads, reload during signing, and a complete Go OIDC client flow including
+signature verification through discovery/JWKS. The timing diagnostic compares 100
+wrong-password samples for known and unknown emails, without a pass/fail threshold.
 
-With Docker available, `bash scripts/compose-smoke.sh` builds and boots the Compose
+With Docker, Compose, curl, and jq available, `bash scripts/compose-smoke.sh` builds and boots the Compose
 service, checks discovery/JWKS/CSS and the CLI, and removes its disposable config.
 It refuses to overwrite `deploy/config/config.json` and uses host port 3000.
 
-For local development, generate a config with `npm run cli -- init`, set its issuer
-to `http://localhost:3000`, then run `SOLOID_CONFIG=/absolute/path/config.json npm start`
-after building. `npm run dev` watches TypeScript; rebuild CSS when changing styles.
-Do not use the test fixture generator for a real deployment.
+For local development, generate a config with `bin/soloid init`, set its issuer
+to `http://localhost:3000`, fill in real hashes, then run
+`SOLOID_CONFIG=/absolute/path/config.json bin/soloid`. `go run ./cmd/soloid` also
+starts the server; rebuild/restart after Go, template, or CSS edits. All UI assets
+are embedded, so the binary runs from any working directory. `bin/soloid --help`
+lists CLI commands, including `healthcheck` and `version`.
+Do not use `go run ./scripts/fixture-config` for a real deployment.
+
+## Migrating from the earlier implementation
+
+The JSON keys, RSA JWKs, Argon2id PHC hashes, user IDs, and OIDC URLs remain
+compatible. Keep your existing config; do not regenerate user IDs or keys.
+The CLI is now `soloid <command>` instead of `node dist/cli.js <command>`;
+Docker Compose invokes the Go binary directly. Rebuild the container when updating.
+Restarting drops outstanding codes and failure counters, as before. The signed
+cookie format and credential binding are preserved for unchanged configuration.
 
 ## Releases and build identity
 
@@ -285,18 +304,18 @@ image to GHCR. Draft releases and tag pushes alone do not trigger publishing.
 Stable releases update the version, major.minor, and `latest` image tags;
 prereleases do not update major.minor or `latest`.
 
-The release tag and full commit SHA are baked into the server bundle using
+The release tag and full commit SHA are baked into the Go binary with linker flags using
 `SOLOID_VERSION` and `SOLOID_COMMIT` build inputs (Docker build arguments for images).
 The footer shows `Powered by SoloID v0.1.0 (abcdef0)`, with separate links to the
 release and full commit on GitHub. Runtime environment changes cannot relabel a
 built image. Release builds fail if the version is invalid or the commit is unknown.
 
 Development builds omit the version: `Powered by SoloID (abcdef0)`.
-`npm run build` reads the checkout's commit automatically; `npm run dev` supplies
-it to the unbundled server. Docker cannot read `.git`, so use the build command
+`go run ./scripts/build` reads the checkout's commit automatically. Plain
+`go build`/`go run` use Go's embedded VCS revision when available. Docker cannot read `.git`, so use the build command
 above or `docker build --build-arg SOLOID_COMMIT=$(git rev-parse HEAD) .`.
 Source archives or development images built without a commit display `(unknown)`
-without a broken GitHub link. The package.json version does not label releases.
+without a broken GitHub link. There is no separately maintained package version.
 
 CI runs tests and the Compose smoke test. A PR does not publish an image or deploy
 anything. The implementation decisions are recorded in [PLAN.md](PLAN.md).
