@@ -1,6 +1,10 @@
 import type { Child } from 'hono/jsx';
 
 function Layout({ title, children }: { title: string; children: Child }) {
+  const version = process.env.SOLOID_VERSION;
+  const commit = process.env.SOLOID_COMMIT ?? 'unknown';
+  const github = 'https://github.com/st3fan/SoloID';
+  const linkClass = 'underline underline-offset-4 hover:text-stone-900 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700';
   return <html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title} · SoloID</title><link rel="stylesheet" href="/app.css" /></head>
     <body class="min-h-dvh bg-stone-100 text-stone-900 antialiased">
@@ -8,10 +12,13 @@ function Layout({ title, children }: { title: string; children: Child }) {
         <header class="flex items-center justify-between border-b border-stone-200 py-7">
           <a href="/" class="flex items-center gap-2.5 text-xl font-semibold tracking-tight" aria-label="SoloID home">
             <span class="flex size-8 items-center justify-center rounded-lg bg-stone-900 text-sm text-white" aria-hidden="true">S</span>SoloID
-          </a><span class="text-xs tracking-wide text-stone-500">YOUR IDENTITY. YOUR SERVER.</span>
+          </a>
         </header>
         <main class="flex flex-1 items-center justify-center py-12"><div class="w-full max-w-md">{children}</div></main>
-        <footer class="flex justify-between gap-3 border-t border-stone-200 py-6 text-xs text-stone-500"><span>Simple, private sign-in.</span><span>Powered by SoloID</span></footer>
+        <footer class="border-t border-stone-200 py-6 text-right text-xs leading-6 text-stone-500">
+          Powered by SoloID{version && <> <a class={linkClass} href={`${github}/releases/tag/${encodeURIComponent(version)}`}>v{version.replace(/^v/, '')}</a></>}
+          {' ('}{commit === 'unknown' ? 'unknown' : <a class={linkClass} href={`${github}/commit/${commit}`}>{commit.slice(0, 7)}</a>}{')'}
+        </footer>
       </div>
     </body></html>;
 }
@@ -22,7 +29,6 @@ const cardClass = 'rounded-2xl border border-stone-200 bg-white p-7 shadow-sm sm
 
 export function LoginPage({ app, csrf, email = '', error }: { app: string; csrf: string; email?: string; error?: string }) {
   return <Layout title="Sign in">
-    <div class="mb-6 text-center text-xs font-medium uppercase tracking-widest text-emerald-800">One account. Your apps.</div>
     <section class={cardClass} aria-labelledby="heading">
       <h1 id="heading" class="text-2xl font-semibold tracking-tight">Welcome back</h1>
       <p class="mt-2 text-sm leading-6 text-stone-500">Sign in to continue to <strong class="font-medium text-stone-900">{app}</strong>.</p>
@@ -36,7 +42,6 @@ export function LoginPage({ app, csrf, email = '', error }: { app: string; csrf:
         <button type="submit" class={buttonClass}>Sign in <span aria-hidden="true" class="ml-1">→</span></button>
       </form>
     </section>
-    <p class="mt-6 text-center text-xs leading-5 text-stone-500">Your account is managed by your server administrator.</p>
   </Layout>;
 }
 

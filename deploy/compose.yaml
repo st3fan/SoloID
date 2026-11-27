@@ -3,6 +3,9 @@ services:
     image: ${SOLOID_IMAGE:-ghcr.io/st3fan/soloid:latest}
     build:
       context: ..
+      args:
+        SOLOID_VERSION: ${SOLOID_VERSION:-}
+        SOLOID_COMMIT: ${SOLOID_COMMIT:-unknown}
     restart: unless-stopped
     environment:
       SOLOID_CONFIG: /config/config.json

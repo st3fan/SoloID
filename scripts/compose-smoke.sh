@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Run from the repository root. Never replace an operator's existing config.
+export SOLOID_COMMIT="${SOLOID_COMMIT:-$(git rev-parse HEAD)}"
 if [[ -e deploy/config/config.json ]]; then
   echo 'Refusing to replace deploy/config/config.json' >&2
   exit 1
@@ -27,6 +28,14 @@ assert.equal(jwks.keys.length, 1);
 assert.equal(jwks.keys[0].kty, 'RSA');
 assert.equal(jwks.keys[0].d, undefined);
 assert.equal((await fetch('http://localhost:3000/app.css')).status, 200);
-console.log('Compose smoke test passed: healthy, discovery, public JWKS, CSS');
+const page = await (await fetch('http://localhost:3000/')).text();
+assert.ok(page.includes(`href="https://github.com/st3fan/SoloID/commit/${process.env.SOLOID_COMMIT}"`));
+assert.ok(page.includes(`>${process.env.SOLOID_COMMIT.slice(0, 7)}</a>`));
+if (process.env.SOLOID_VERSION) {
+  assert.ok(page.includes(`href="https://github.com/st3fan/SoloID/releases/tag/${encodeURIComponent(process.env.SOLOID_VERSION)}"`));
+} else {
+  assert.ok(!page.includes('/releases/tag/'));
+}
+console.log('Compose smoke test passed: healthy, discovery, public JWKS, CSS, build identity');
 JS
 docker compose -p soloid-smoke -f deploy/compose.yaml exec -T soloid /nodejs/bin/node dist/cli.js check --config /config/config.json

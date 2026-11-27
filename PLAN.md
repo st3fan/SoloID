@@ -239,7 +239,13 @@ on the host and one on a shared external Docker network.
 - Proxy terminates HTTPS, serves the issuer at its own hostname/root, preserves
   cookies, and does not cache. Do not trust forwarded addresses for authentication.
 - Build locally until images are published. CI tests pushes and PRs. A separate
-  maintainer-triggered `v*` tag workflow publishes a GHCR image; no PR deployment.
+  GitHub Release `published` workflow tests and publishes a GHCR image from the
+  release tag; no publishing on draft releases, tag pushes alone, or PRs.
+- Bake the semantic release tag and full commit SHA into the server bundle.
+  The footer shows `Powered by SoloID v0.1.0 (abcdef0)`, linking the version to
+  its GitHub release and the short hash to its full commit. Development builds
+  omit the version; source archives without Git metadata show an unlinked unknown
+  commit. Prereleases do not move the stable major.minor or `latest` image tags.
 
 ## Verification and delivery
 

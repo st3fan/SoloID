@@ -22,7 +22,8 @@ beforeAll(async () => {
   await mkdir('deploy/config', { recursive: true });
   directory = await mkdtemp('deploy/config/integration-');
   await writeFile(`${directory}/config.json`, JSON.stringify(config), { mode: 0o600 });
-  server = spawn(process.execPath, ['dist/server.js'], { env: { ...process.env, SOLOID_CONFIG: resolve(directory, 'config.json'), PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  server = spawn(process.execPath, ['dist/server.js'], { env: { ...process.env, SOLOID_CONFIG: resolve(directory, 'config.json'), PORT: String(port),
+    SOLOID_VERSION: 'v99.0.0', SOLOID_COMMIT: '0'.repeat(40) }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout!.on('data', b => { logs += b.toString(); });
   server.stderr!.on('data', b => { logs += b.toString(); });
   await waitFor(async () => { try { return (await fetch(`${issuer}/healthz`)).ok; } catch { return false; } });
@@ -55,6 +56,8 @@ it('completes discovery → browser login → code exchange → signed ID token 
   const text = await page.text();
   expect(text).toContain('Welcome back');
   expect(text).not.toContain('<script');
+  expect(text).not.toContain('One account. Your apps.');
+  expect(text).not.toContain('Your account is managed by your server administrator.');
   const csrf = text.match(/name="csrf" value="([^"]+)"/)![1];
   const login = await fetch(`${issuer}/login`, { method: 'POST', redirect: 'manual', headers: { cookie, origin: issuer },
     body: new URLSearchParams({ csrf, email: 'one@example.com', password }) });
@@ -66,6 +69,23 @@ it('completes discovery → browser login → code exchange → signed ID token 
   expect((await fetch(`${issuer}/app.css`)).headers.get('content-type')).toContain('text/css');
   expect(logs).not.toContain(password);
   expect(logs).not.toContain(tokens.access_token);
+});
+
+it('shows linked build identity, not runtime overrides, without the removed slogans', async () => {
+  const page = await (await fetch(`${issuer}/`)).text();
+  const footer = page.match(/<footer\b[^>]*>([\s\S]*?)<\/footer>/)![1];
+  const commit = process.env.SOLOID_COMMIT ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  expect(footer).toContain(`href="https://github.com/st3fan/SoloID/commit/${commit}"`);
+  expect(footer).toContain(`>${commit.slice(0, 7)}</a>`);
+  if (process.env.SOLOID_VERSION) {
+    expect(footer).toContain(`href="https://github.com/st3fan/SoloID/releases/tag/${encodeURIComponent(process.env.SOLOID_VERSION)}"`);
+    expect(footer).toContain(`>v${process.env.SOLOID_VERSION.replace(/^v/, '')}</a>`);
+  } else {
+    expect(footer).not.toContain('/releases/tag/');
+  }
+  expect(footer).toContain('Powered by SoloID');
+  expect(page).not.toContain('YOUR IDENTITY. YOUR SERVER.');
+  expect(page).not.toContain('Simple, private sign-in.');
 });
 
 it('validates configuration with the CLI and reloads atomically on SIGHUP', async () => {

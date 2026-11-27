@@ -3,7 +3,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY tsconfig.json ./
+COPY tsup.config.ts ./
 COPY src ./src
+ARG SOLOID_VERSION=""
+ARG SOLOID_COMMIT="unknown"
 RUN npm run typecheck && npm run build && npm prune --omit=dev
 
 FROM gcr.io/distroless/nodejs22-debian12:nonroot

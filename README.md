@@ -16,7 +16,7 @@ Requires Docker with Compose. Run the commands below from `deploy/` in a checkou
 of this repository. Until an image release is published, build it locally:
 
 ```sh
-docker compose build
+SOLOID_COMMIT=$(git rev-parse HEAD) docker compose build
 mkdir -p config
 chmod 700 config
 umask 077
@@ -269,6 +269,27 @@ to `http://localhost:3000`, then run `SOLOID_CONFIG=/absolute/path/config.json n
 after building. `npm run dev` watches TypeScript; rebuild CSS when changing styles.
 Do not use the test fixture generator for a real deployment.
 
-CI runs tests and the Compose smoke test. A separate workflow publishes an amd64
-image to GHCR only when a maintainer pushes a `v*` release tag. A PR does not publish
-an image or deploy anything. The implementation decisions are recorded in [PLAN.md](PLAN.md).
+## Releases and build identity
+
+Publish a GitHub Release with a semantic version tag such as `v0.1.0` or
+`v0.2.0-rc.1`. The **Release image** workflow checks out that tag, resolves its exact
+commit, runs tests and the Compose smoke test, then builds and publishes an amd64
+image to GHCR. Draft releases and tag pushes alone do not trigger publishing.
+Stable releases update the version, major.minor, and `latest` image tags;
+prereleases do not update major.minor or `latest`.
+
+The release tag and full commit SHA are baked into the server bundle using
+`SOLOID_VERSION` and `SOLOID_COMMIT` build inputs (Docker build arguments for images).
+The footer shows `Powered by SoloID v0.1.0 (abcdef0)`, with separate links to the
+release and full commit on GitHub. Runtime environment changes cannot relabel a
+built image. Release builds fail if the version is invalid or the commit is unknown.
+
+Development builds omit the version: `Powered by SoloID (abcdef0)`.
+`npm run build` reads the checkout's commit automatically; `npm run dev` supplies
+it to the unbundled server. Docker cannot read `.git`, so use the build command
+above or `docker build --build-arg SOLOID_COMMIT=$(git rev-parse HEAD) .`.
+Source archives or development images built without a commit display `(unknown)`
+without a broken GitHub link. The package.json version does not label releases.
+
+CI runs tests and the Compose smoke test. A PR does not publish an image or deploy
+anything. The implementation decisions are recorded in [PLAN.md](PLAN.md).
