@@ -82,6 +82,26 @@ describe('OIDC provider HTTP contract', () => {
     expect(responses.map(r => r.status).sort()).toEqual([200, 400]);
   });
 
+  it('does not return tokens if configuration reloads during signing', async () => {
+    const code = await obtainCode(browser, 'public');
+    const replacement = await fixture();
+    const sign = crypto.subtle.sign.bind(crypto.subtle);
+    // Force the reload at the asynchronous crypto boundary, using real signatures.
+    const signing = vi.spyOn(crypto.subtle, 'sign').mockImplementationOnce(async (...args) => {
+      const signature = await sign(...args);
+      provider.reload(replacement);
+      return signature;
+    });
+    try {
+      const response = await browser.request('/token', tokenRequest(code, 'public'));
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: 'temporarily_unavailable' });
+    } finally { signing.mockRestore(); }
+    // Restarting authorization works against the replacement runtime.
+    const freshCode = await obtainCode(browser, 'public');
+    expect((await browser.request('/token', tokenRequest(freshCode, 'public'))).status).toBe(200);
+  });
+
   it('expires codes after 60 seconds and access tokens after 15 minutes', async () => {
     const now = Date.now();
     const code = await obtainCode(browser, 'public');
@@ -203,9 +223,9 @@ describe('OIDC provider HTTP contract', () => {
     expect((await browser.request('/userinfo', { headers: { authorization: `Bearer ${tokens.access_token}` } })).status).toBe(401);
   });
 
-  it('keeps old tokens valid during signing-key rotation, until the old public key is removed', async () => {
-    const code = await obtainCode(browser, 'public');
-    const tokens = await (await browser.request('/token', tokenRequest(code, 'public'))).json();
+  it('keeps old tokens and expired logout hints valid while their signing key is retained', async () => {
+    const code = await obtainCode(browser);
+    const tokens = await (await browser.request('/token', tokenRequest(code))).json();
     const config = structuredClone(runtime.config);
     config.signing_key = (await fixture()).config.signing_key;
     config.previous_public_keys = runtime.jwks.keys;
@@ -213,9 +233,15 @@ describe('OIDC provider HTTP contract', () => {
     const info = () => browser.request('/userinfo', { headers: { authorization: `Bearer ${tokens.access_token}` } });
     expect((await info()).status).toBe(200);
     expect((await (await browser.request('/jwks.json')).json()).keys).toHaveLength(2);
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(Date.now() + 6 * 60000);
+    const logout = new URLSearchParams({ client_id: 'web', post_logout_redirect_uri: 'https://app.example.com/signed-out', id_token_hint: tokens.id_token });
+    expect((await browser.request(`/logout?${logout}`)).status).toBe(200);
     config.previous_public_keys = [];
     provider.reload(await prepareConfig(config));
     expect((await info()).status).toBe(401);
+    expect((await browser.request(`/logout?${logout}`)).status).toBe(400);
+    logout.delete('id_token_hint');
+    expect((await browser.request(`/logout?${logout}`)).status).toBe(200);
   });
 
   it('sets host-only Secure cookies behind HTTPS and preserves sessions across a restart', async () => {
@@ -264,6 +290,8 @@ describe('configuration validation', () => {
     (c: any) => { c.users[0].password_hash = c.users[0].password_hash.slice(0, -1) + 'B'; },
     (c: any) => { c.clients[0].redirect_uris = ['https://app.example.com/*']; },
     (c: any) => { c.clients[0].redirect_uris = ['https://app.example.com/callback#fragment']; },
+    (c: any) => { c.clients[0].redirect_uris = ['https://app.example.com/callback#']; },
+    (c: any) => { c.clients[0].post_logout_redirect_uris = ['https://app.example.com/signed-out#']; },
     (c: any) => { c.clients[0].client_secret_hash = undefined; },
     (c: any) => { c.clients[1].client_secret_hash = c.clients[0].client_secret_hash; },
     (c: any) => { c.clients[0].allowed_users = ['missing']; },

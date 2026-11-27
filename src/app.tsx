@@ -173,7 +173,10 @@ export function createApp(initial: Runtime, log: (event: Record<string, unknown>
       !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier) || !equal(code.code_challenge, challenge(verifier))) {
       return c.json({ error: 'invalid_grant' }, 400);
     }
-    return c.json(await issueTokens(r, code, user));
+    const tokens = await issueTokens(r, code, user);
+    // Signing yields twice; a reload can invalidate credentials during either await.
+    if (runtime !== r) throw new BusyError();
+    return c.json(tokens);
   });
 
   app.on(['GET', 'POST'], '/userinfo', async c => {

@@ -64,7 +64,7 @@ async function main() {
       password = await promptPassword('Password: ');
       if (password !== await promptPassword('Confirm password: ')) throw new Error('Passwords do not match');
     }
-    if (password.length < 12 || Buffer.byteLength(password) > 1024) throw new Error('Use at least 12 characters and at most 1024 bytes');
+    if ([...password].length < 12 || Buffer.byteLength(password) > 1024) throw new Error('Use at least 12 Unicode code points and at most 1024 bytes');
     console.log(await hashPassword(password));
   } else if (command === 'gen-secret') {
     const secret = randomBytes(32).toString('base64url');

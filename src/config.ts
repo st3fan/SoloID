@@ -8,7 +8,7 @@ export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 const httpURL = z.string().max(2048).refine((value) => {
   try {
     const u = new URL(value);
-    return !u.username && !u.password && !u.hash && !value.includes('*') &&
+    return !u.username && !u.password && !value.includes('#') && !value.includes('*') &&
       (u.protocol === 'https:' || (u.protocol === 'http:' && u.hostname === 'localhost'));
   } catch { return false; }
 }, 'Use an exact HTTPS URL without credentials or fragment (HTTP localhost is allowed)');

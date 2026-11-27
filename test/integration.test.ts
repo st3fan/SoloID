@@ -1,4 +1,4 @@
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, execFileSync, type ChildProcess } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
@@ -112,4 +112,17 @@ it('provides CLI initialization, password hashing and client-secret generation',
   const secret = JSON.parse(invoke(['gen-secret']));
   expect(secret.client_secret).toHaveLength(43);
   expect(secret.client_secret_hash).toMatch(/^\$argon2id\$/);
+});
+
+it('counts password code points while preserving the UTF-8 byte limit', () => {
+  const hash = (input: string) => spawnSync(process.execPath, ['dist/cli.js', 'hash', '--stdin'], { encoding: 'utf8', input });
+  for (const input of ['😀'.repeat(6), '😀'.repeat(11)]) {
+    const result = hash(input);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('at least 12');
+    expect(result.stdout).toBe('');
+  }
+  expect(hash('😀'.repeat(12)).status).toBe(0);
+  expect(hash('😀'.repeat(256)).status).toBe(0);
+  expect(hash('😀'.repeat(257)).status).toBe(1);
 });

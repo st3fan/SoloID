@@ -31,8 +31,9 @@ Edit `config/config.json`:
 1. Set `issuer` to the public HTTPS origin, e.g. `https://id.example.com`, without a
    trailing slash or path.
 2. Set your email and name. Paste the output of `hash` into `password_hash`.
-   `hash` prompts twice without echo. It requires 12–1024 characters/bytes
-   (at least 12 characters, at most 1024 UTF-8 bytes).
+   `hash` prompts twice without echo. It requires at least 12 Unicode code points
+   and at most 1024 UTF-8 bytes; a single-code-point emoji such as 😀 counts once,
+   not twice as it would in UTF-16 units.
 3. Configure each app's exact callback URL. Give the app the `client_secret` from
    `gen-secret`; put only its `client_secret_hash` in SoloID's config.
 4. Keep each user's `id` unchanged for that person's lifetime. Generate a different
@@ -197,9 +198,15 @@ docker compose up -d
   There is no front-channel or back-channel app logout, and copied cookies cannot
   be individually revoked.
 - For signing-key rotation, replace `signing_key` and retain the previous public
-  JWK in `previous_public_keys` for at least 15 minutes. Do not copy the old
-  private fields there. Changing `secret` invalidates all SoloID sessions and
-  `/userinfo` access, but does not change user IDs.
+  JWK in `previous_public_keys` for at least 15 minutes **and for as long as apps
+  may send old ID tokens as logout hints**. This can be the app's session lifetime,
+  not the ID token's five-minute expiry: SoloID accepts expired, signed logout hints.
+  After removing a key, clients must omit hints signed by it and instead supply
+  `client_id` with their registered `post_logout_redirect_uri`; logout still requires
+  confirmation. Supplying `client_id` alongside an unverifiable hint does not bypass
+  signature validation. Do not copy old private fields into `previous_public_keys`.
+  Changing `secret` invalidates all SoloID sessions and `/userinfo` access, but does
+  not change user IDs.
 - Protect access logs at your proxy: callback query strings contain authorization
   codes. SoloID logs outcomes and email addresses as JSON, never passwords, codes,
   tokens, or keys. Emails in logs are personal data; set retention accordingly.

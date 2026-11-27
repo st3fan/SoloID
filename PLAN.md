@@ -99,7 +99,7 @@ network noise, queue contention, lookup, and success redirects differ. Locked
 attempts skip Argon2 equally for known and unknown emails. Overlong requests are
 rejected before hashing for either kind of account. Cap passwords at 1024 UTF-8
 bytes, emails at 254 characters, request bodies at 16 KiB, and URLs at 8192
-characters. The CLI requires new passwords of at least 12 characters.
+characters. The CLI requires new passwords of at least 12 Unicode code points.
 
 Run a diagnostic alternating wrong passwords for known users and unknown emails,
 with warmup and 100 samples per group; report median/p95. Do not assert statistical
@@ -139,7 +139,10 @@ The example intentionally has invalid placeholders; `init` creates real keys.
 - `secret`: canonical base64url encoding of 32 random bytes.
 - `signing_key`: RSA private JWK, at least 2048 bits. Derive `kid` as its public
   RFC 7638 thumbprint. JWKS never exports private components.
-- `previous_public_keys`: old public RSA keys retained during rotation.
+- `previous_public_keys`: old public RSA keys retained during rotation for at least
+  the access-token lifetime and as long as apps may submit old ID-token logout
+  hints, even after ID-token expiry. After key removal, apps must omit those hints
+  and use `client_id` with their registered post-logout redirect instead.
 - `session_ttl`: defaults to `12h`, up to 30 days.
 - `users`: nonempty list of unique stable `id`, unique normalized `email`, optional
   `name`, `password_hash`, and `email_verified` (defaults false). The operator must
