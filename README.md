@@ -1,6 +1,4 @@
-# SoloID
-
-The Solo Identity Provider. Just for you.
+![SoloID — The Solo Identity Provider. Just for you.](docs/images/banner.png)
 
 A small self-hosted OpenID Connect provider: one JSON file, email/password login,
 multiple users and apps, and no database. Built in Go with `net/http`, escaped
