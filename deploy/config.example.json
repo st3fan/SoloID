@@ -1,0 +1,32 @@
+{
+  "issuer": "https://id.example.com",
+  "secret": "GENERATE_WITH_INIT",
+  "signing_key": { "GENERATE_WITH_INIT": true },
+  "previous_public_keys": [],
+  "session_ttl": "12h",
+  "users": [
+    {
+      "id": "1d92c010-2b4c-4ee3-9bba-4e29c8b7e3c2",
+      "email": "you@example.com",
+      "name": "Your name",
+      "email_verified": false,
+      "password_hash": "GENERATE_WITH_HASH"
+    },
+    {
+      "id": "b87fae2b-1f97-4347-9a42-350a07ace6c0",
+      "email": "alex@example.com",
+      "name": "Alex",
+      "password_hash": "GENERATE_WITH_HASH"
+    }
+  ],
+  "clients": [
+    {
+      "client_id": "grafana",
+      "name": "Grafana",
+      "client_secret_hash": "HASH_FROM_GEN_SECRET",
+      "redirect_uris": ["https://grafana.example.com/login/generic_oauth"],
+      "post_logout_redirect_uris": ["https://grafana.example.com/login"],
+      "allowed_users": ["1d92c010-2b4c-4ee3-9bba-4e29c8b7e3c2"]
+    }
+  ]
+}

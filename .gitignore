@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.amp/
+deploy/config/
+.env
+*.log

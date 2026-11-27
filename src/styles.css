@@ -1,0 +1,7 @@
+@import "tailwindcss";
+@source "./views.tsx";
+
+@layer base {
+  button, a { -webkit-tap-highlight-color: transparent; }
+  button { cursor: pointer; }
+}

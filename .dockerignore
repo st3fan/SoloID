@@ -1,0 +1,7 @@
+.git
+.amp
+node_modules
+dist
+deploy/config
+.env
+*.log
